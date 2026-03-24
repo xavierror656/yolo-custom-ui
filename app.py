@@ -14,6 +14,7 @@ from ultralytics.models.yolo.yoloe import YOLOEVPSegPredictor
 import av
 import pandas as pd
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
+from streamlit_js_eval import streamlit_js_eval
 
 st.set_page_config(page_title="IINIA - Detector YOLO", page_icon=None, layout="wide")
 
@@ -531,6 +532,34 @@ with tab_video:
 with tab_webcam:
     st.info("Pulsa START para activar la camara. La deteccion corre en tiempo real fotograma a fotograma.")
 
+    # ── Enumeración de cámaras via JS ────────────────────────────────────────
+    raw_devices = streamlit_js_eval(
+        js_expressions=(
+            "navigator.mediaDevices.enumerateDevices()"
+            ".then(ds => JSON.stringify("
+            "  ds.filter(d => d.kind === 'videoinput')"
+            "    .map((d, i) => ({id: d.deviceId, label: d.label || ('Camara ' + (i + 1))}))"
+            "))"
+        ),
+        key="enum_cameras",
+    )
+
+    selected_device_id = None
+    if raw_devices:
+        try:
+            cam_devices = json.loads(raw_devices)
+            if cam_devices:
+                cam_labels = [d["label"] for d in cam_devices]
+                cam_sel = st.selectbox(
+                    "Seleccionar camara",
+                    cam_labels,
+                    key="cam_selector",
+                )
+                cam_idx = cam_labels.index(cam_sel)
+                selected_device_id = cam_devices[cam_idx]["id"] or None
+        except (json.JSONDecodeError, KeyError, ValueError):
+            pass
+
     _framework     = framework
     _model         = model
     _prompt_mode   = prompt_mode
@@ -596,14 +625,15 @@ with tab_webcam:
 
     RTC_CONFIG = RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]})
 
+    video_constraints: dict = {"width": {"ideal": 1280}, "height": {"ideal": 720}, "frameRate": {"ideal": 30}}
+    if selected_device_id:
+        video_constraints["deviceId"] = {"exact": selected_device_id}
+
     ctx = webrtc_streamer(
-        key="yolo-webcam",
+        key=f"yolo-webcam-{selected_device_id or 'default'}",
         video_processor_factory=YOLOVideoProcessor,
         rtc_configuration=RTC_CONFIG,
-        media_stream_constraints={
-            "video": {"width": {"ideal": 1280}, "height": {"ideal": 720}, "frameRate": {"ideal": 30}},
-            "audio": False,
-        },
+        media_stream_constraints={"video": video_constraints, "audio": False},
         async_processing=True,
     )
 
