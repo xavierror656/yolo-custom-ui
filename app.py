@@ -294,65 +294,44 @@ with tab_video:
                 st.download_button("⬇️ Download annotated video", f, file_name="annotated.mp4")
 
 
-# ── WEBCAM — live label streaming ─────────────────────────────────────────────
+# ── WEBCAM — browser camera via st.camera_input ───────────────────────────────
 with tab_webcam:
-    st.info("Labels update in real-time next to the video feed.")
+    st.info("Usa la cámara de tu navegador. Cada foto se procesa automáticamente con YOLO.")
 
     col_cam, col_labels = st.columns([3, 1])
 
     with col_cam:
-        run = st.toggle("📷 Start webcam")
-        frame_ph = st.empty()
+        snapshot = st.camera_input("📷 Cámara")
 
     with col_labels:
-        st.subheader("Live labels")
-        label_ph  = st.empty()   # pill summary  (updates every frame)
-        table_ph  = st.empty()   # detail table  (updates every frame)
-        stats_ph  = st.empty()   # latency / fps
+        st.subheader("Detecciones")
+        label_ph = st.empty()
+        table_ph = st.empty()
+        stats_ph = st.empty()
 
-    if run:
-        cap = cv2.VideoCapture(0)
-        if not cap.isOpened():
-            st.error("Could not open webcam.")
+    if snapshot is not None:
+        pil_img = Image.open(snapshot).convert("RGB")
+        img_np  = np.array(pil_img)
+
+        t0      = time.perf_counter()
+        results = run_inference(model, img_np)
+        latency = (time.perf_counter() - t0) * 1000
+
+        ann     = result_to_image(results[0])
+        ann_rgb = cv2.cvtColor(ann, cv2.COLOR_BGR2RGB)
+
+        with col_cam:
+            st.image(ann_rgb, use_container_width=True)
+
+        render_live_labels(results[0], label_ph)
+
+        rows = extract_labels(results[0])
+        if rows:
+            table_ph.dataframe(rows, use_container_width=True, height=300)
         else:
-            frame_count = 0
-            t_start     = time.perf_counter()
+            table_ph.info("Sin detecciones")
 
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-
-                rgb  = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                t0   = time.perf_counter()
-                results = run_inference(model, rgb)
-                latency = (time.perf_counter() - t0) * 1000
-                frame_count += 1
-
-                ann = result_to_image(results[0])
-                frame_ph.image(cv2.cvtColor(ann, cv2.COLOR_BGR2RGB), use_container_width=True)
-
-                # ── Real-time labels ─────────────────────────────────────────
-                render_live_labels(results[0], label_ph)
-
-                rows = extract_labels(results[0])
-                if rows:
-                    table_ph.dataframe(rows, use_container_width=True, height=300)
-                else:
-                    table_ph.empty()
-
-                elapsed = time.perf_counter() - t_start
-                fps_live = frame_count / elapsed if elapsed > 0 else 0
-                stats_ph.caption(f"Latency: {latency:.0f} ms · {fps_live:.1f} FPS · {len(rows)} obj")
-                # ─────────────────────────────────────────────────────────────
-
-                # Check if toggle was switched off
-                if not st.session_state.get("📷 Start webcam", False):
-                    break
-
-            cap.release()
-            frame_ph.empty(); label_ph.empty(); table_ph.empty(); stats_ph.empty()
-            st.info("Webcam stopped.")
+        stats_ph.caption(f"Latencia: {latency:.0f} ms · {len(rows)} objetos")
 
 
 # ── URL / PATH ────────────────────────────────────────────────────────────────
