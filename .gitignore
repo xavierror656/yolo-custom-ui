@@ -12,3 +12,6 @@ venv/
 *.mp4
 *.avi
 *.mov
+*.ts
+logo_preview.png
+CLAUDE.md
